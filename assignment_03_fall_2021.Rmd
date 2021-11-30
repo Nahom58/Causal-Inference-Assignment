@@ -1,0 +1,270 @@
+---
+title: "Assignment 3, Fall 2021"
+author: "Nahom Agize"
+date: "11/28/2021"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+  word_document: default
+---
+
+```{r setup, include=FALSE}
+# Don't change the line below
+knitr::opts_chunk$set(echo = TRUE, warning=FALSE, 
+                      message=FALSE, fig.width=6, fig.align="center")
+# If you are using other packages, load them here. 
+# If you don't have the following packages installed,
+# please install them first. But don't include the installation
+# code here because every time you knit this document they'll 
+# be reinstalled which is not necessary!
+library(Matching)
+library(knitr)
+library(janitor)
+library(tidyverse)
+library(rbounds)
+library(rgenoud)
+# we need to set the seed of R's random number generator, 
+# in order to produce comparable results 
+set.seed(1983)
+```
+
+# A few important notes
+
+**Option 1 for submitting your assignment**: *This method is actually preferred. This is an RMarkdown document. Did you know you can open this document in RStudio, edit it by adding your answers and code, and then knit it to a pdf? To submit your answers to this assignment, simply knit this file as a pdf and submit it as a pdf on Forum. All of your code must be included in the resulting pdf file, i.e., don't set echo = FALSE in any of your code chunks. [This](https://rstudio.com/wp-content/uploads/2015/02/rmarkdown-cheatsheet.pdf) is a cheat sheet for using Rmarkdown. If you have questions about RMarkdown, please post them on Piazza. Try knitting this document in your RStudio. You should be able to get a pdf file. At any step, you can try knitting the document and recreate a pdf. If you get an error, you might have incomplete code.*
+
+**Option 2 for submitting your assignment**: *If you are not comfortable with RMarkdown, you can also choose the Google Doc version of this assignment, make a copy of it and edit the Google doc (include your code, figures, results, and explanations) and at the end download your Google Doc as a pdf and submit the pdf file.*
+
+**Note**: *Either way (if you use Rmd and knit as pdf OR if you use Google Doc and download as pdf) you should make sure you put your name on top of the document.*
+
+**Note**: *The first time you run this document you may get an error that some packages don't exist. If you don't have the packages listed on top of this document, install them first and you won't get those errors.*
+
+**Note**: *Don't change seed in the document. The function `set.seed()` has already been set at the beginning of this document to 1983 Changing the see again to a different number will make your results not replicable.*
+
+**Note**: *You don't need to tag any additional HC or LO. The set of HCs or HOs that we will grade based on, are provided in the assignment description.*
+
+
+## QUESTION 1: A DGP-based example
+
+Imagine you are an engineer in the Formula 1 paddock and the team boss asks you to do some data analysis to find out the effect of the new fuel type **Minervine** (treatment variable, $D$) on car performance (outcome variable, $Y$) in terms of speed. You also have other variables $V_1$ to $V_3$ and let’s assume that instead of getting the data, it is possible to generate it using the next few lines of code. 
+
+```{r}
+set.seed(130)  
+n = 1000  #number of data points
+
+#syntax for the normal distribution here is rnorm(sample size, mean, SD)
+V1 = rnorm(n, 50, 10)
+#getting a binary variable
+V2 = sample(c(1,0), replace = TRUE, size = n, prob = c(.6,.4))
+V3 = rnorm(n, 50, 10)
+#1 is new fuel, 0 is old fuel type 
+D  = as.numeric(rnorm(n, .01*V1 - .75*V2 + 0.02*V3, 1) > .5)
+Y  = rnorm(n, .85*D - 0.15*V2 + 0.95*V3 + 275, .4)
+
+#combining everything in a data frame
+df = data.frame(V1, V2, V3, D, Y)
+```
+
+#### STEP 1
+
+From the variables $V_1$, $V_2$, and $V_3$, which one(s) are not confounding variable(s) (covariates that cause confounding)? Remember, a rule of thumb (although not a perfect rule) is that the variable is correlated with both the treatment variable and the outcome variable. 
+
+Following the rule of thumb, we see that V1 is only seen being correlated with D, while V2 and V3 are seen being correlated with both D(treatment variable) and Y(outcome variable), thus V1 is said to be a non-confounding covariate.
+
+#### STEP 2
+
+What is the true treatment effect just by looking at the data generating process above?
+
+The coefficient associated with the treatment variable(D) is said to be the true treatment effect. In this case, we see the coefficient to be 0.85. 
+
+#### STEP 3
+
+Are the variables you picked in Step 1 balanced across the treatment and control groups? You can use any R function from any package to check this (for instance, you can check the `cobalt` package). You can also use the `MatchBalance()` function. Show your data visualization and explain.
+
+**Note**: *This is optional but you can use the `gridExtra` package and its `grid.arrange()` function to put all the 4 graphs in one 2 x 2 graph. Read more about the package and how to use it here: https://cran.r-project.org/web/packages/egg/vignettes/Ecosystem.html. Set `nrow = 2`.*
+
+```{r}
+
+#m1.out <- Match(Tr = df$D , X= cbind(df$V2, df$V3) )
+
+m1.balance <- MatchBalance(D ~ V2 + V3, data=df)
+
+
+```
+We can see from the above values that the p-values are much less than 1%, let alone reach 5%. For that reason, we can observe that our two covariates are unbalanced. We can thus move on to various matching techniques to account for this imbalance.
+
+
+#### STEP 4
+
+Write code that would simply calculate the Prima Facie treatment effect in the data above. What’s the Prima Facie treatment effect? 
+
+```{r}
+#calculate prima Facie treatment effect
+prima_facie <- mean(df$Y[D == 1]) - mean(df$Y[D == 0])
+
+#show result
+prima_facie
+```
+
+#### STEP 5
+
+Explain why the Prima Facie effect is not the true average causal effect from Step 2.
+
+The prima facie effect is naive in the sense that it also includes the selection bias associated with it, which makes it deviate from the true average causal effect. The prima_facie effect only considers the observed outcomes and does not take into account the counterfactuals/ potential outcomes. We know that true causal effect is the difference between an observed outcome on the treated group and it’s counterfactual (which cannot be observed). The prima facie did not take into account any counterfactual or potential outcomes, but instead simply took the difference of the outcomes between the treated and the control, and thus ignored any baseline differences that could have existed. 
+
+#### STEP 6
+
+Use the covariates that you identified in Step 1 above and use propensity score matching to create better balance across the two groups. Are the variables you picked in the step above balanced across the treatment and control groups after propensity score matching? You can use any R function from any package to check this (for instance, you can check the `cobalt` package). You can also use the `MatchBalance()` function. Show your data visualization and explain.
+
+**Note**: *This is optional but you can use the `gridExtra` package and its `grid.arrange()` function to put all the 4 graphs in one 2 x 2 graph. Read more about the package and how to use it here: https://cran.r-project.org/web/packages/egg/vignettes/Ecosystem.html. Set `nrow = 2`.*
+
+```{r}
+# logit for propensity score
+propensity <- glm(data = df, formula = D ~ V2 + V3, family = "binomial")
+
+# generate propensity score
+df$prop <- predict(propensity, type = "response")
+
+# match
+prop.out <- Match(Y = df$Y, Tr = df$D, X = df$prop, M = 1)
+
+# check for balance
+mb <- MatchBalance(data = df, formul = D ~ V2 + V3, match.out = prop.out, nboots = 500)
+```
+We can look at the p-values before and after matching to compare if the propensity score matching actually improved our covariates' balance across the treatment and control groups. We see that the T-test p-value that used to be 0.3% has now increased drastically to 4.1%, which shows that the matching improved the balance. 
+
+#### STEP 7
+
+What is the treatment effect after propensity score matching? 
+
+```{r}
+#show result
+prop.out$est
+
+```
+
+
+#### STEP 8
+
+Use any package to perform sensitivity analysis on the matched units using Rosenbaum’s method. What is the critical value of the parameter gamma (i.e., the gamma for which statistical significance goes away)? Does this imply that your treatment effect is sensitive? Explain!
+
+```{r}
+# show sensitivity analysis table
+psens(prop.out, Gamma=20, GammaInc = .1)
+
+```
+
+We see that the upper bound reaches the threshold of alpha at 5% and becomes insignificant after a gamma value of 17.9, inclusive. This is a really high gamma value indicating that our experiment is highly insensitive and won't be easily affected by random hidden bias. 
+
+#### STEP 9
+
+Use the covariates that you identified in Step 1 above and use genetic matching (multivariate distance matching, i.e., matching on the variables) to try to create better balance across the two groups. Are the variables you picked in the step above balanced across the treatment and control groups after genetic matching? You can use any R function from any package to check this (for instance, you can check the `cobalt` package). You can also use the `MatchBalance()` function. Show your data visualization and explain.
+
+**Note:** *This is optional but you can use the `gridExtra` package and its `grid.arrange()` function to put all the 4 graphs in one 2 x 2 graph. Read more about the package and how to use it here: https://cran.r-project.org/web/packages/egg/vignettes/Ecosystem.html. Set `nrow = 2`.*
+
+**Note:** *In the matching assignment, you may find that the Genetic Matching step takes a while. If you have to reduce pop.size to e.g., 10 or 16 to ensure it stops after only an hour or two, that’s fine. Running your computer for an hour or two is a good thing. Running it for a full day or more is unnecessary overkill (and if this is your situation, change hyperparameters like pop.size to reduce run-time). For example, we suggest you modify the pop.size (e.g., you can set it to 20, 30, etc.!), max.generations (set it to 10, 20 etc.!), and `wait.generations` (set it to 2, 5, etc.!) and that should expedite things.*
+
+```{r}
+# combine all covariates
+X <- cbind(df$V2, df$V3)
+
+
+Tr <- df$D
+Y <= df$Y
+
+#find optimal weights
+gen.out <- GenMatch(Tr=Tr, X=X, estimand="ATT", M=1, pop.size=20, max.generations = 10, wait.generations = 5)
+
+#use the weight matrix for matching
+m.out <- Match(Tr=Tr, X=X, Y=Y,M=1, estimand="ATT", Weight.matrix = gen.out)
+
+#check match balance of genetic matching
+mb.gen <- MatchBalance(data = df, formul = D ~ V2 + V3, match.out = m.out, nboots = 500)
+
+```
+We can see that the minimum p.value has increased after matching and has now become 0.0068. We see that the increase in p.value is not as exagerated as propensity score matching for this case, but we will the if the treatment effect estimation does a better job with genetic matching as compared to propensity score matching.
+
+#### STEP 10
+
+Demonstrate that you know how to perform matching within a narrow caliper (1e-2) caliper on one of the variables and a wide caliper (1e5) on the other one by repeating your analysis from the previous step.
+
+```{r}
+
+#similar as before but with determined caliper values
+gen.out.caliper <- GenMatch(Tr=Tr, X=X, estimand="ATT", M=1, pop.size=20, max.generations = 10, wait.generations = 5, caliper = c(1e-2, 1e5))
+
+#matching caliper using previous code
+m.out.caliper <- Match(Tr=Tr, X=X, Y= Y, M=1, estimand="ATT", Weight.matrix = gen.out.caliper, caliper = c(1e-2, 1e5))
+
+
+summary(m.out.caliper)
+```
+
+#### STEP 11
+
+Discuss your results in a paragraph, providing results. Explain how one could use the “exact” option (in Match) to accomplish almost the same thing as you accomplished with “caliper”.
+
+```{r}
+#similar as before but with determined exact values
+gen.out.exact <- GenMatch(Tr=Tr, X=X, estimand="ATT", M=1, pop.size=20, max.generations = 10, wait.generations = 5, exact = c(1e-2, 1e5))
+
+#matching exact using previous code
+m.out.exact <- Match(Tr=Tr, X=X, Y= Y, M=1, estimand="ATT", Weight.matrix = gen.out.exact, exact = c(1e-2, 1e5))
+
+summary(m.out.exact)
+
+```
+
+#### STEP 12
+
+What is the treatment effect after genetic matching? 
+
+```{r}
+# show results for TE after genetic matching
+m.out$est
+```
+
+#### STEP 13
+
+Similar to before, use any package to perform sensitivity analysis on the matched units using Rosenbaum’s method. What is the critical value of the parameter gamma (i.e., the gamma for which statistical significance goes away)? Does this imply that your treatment effect is sensitive? Explain!
+
+```{r}
+# similar to before to perform sensitivity analysis
+psens(m.out, Gamma=20, GammaInc = .1)
+
+```
+We see that the upper bound reaches the threshold of alpha at 5% and becomes insignificant after a gamma value of 14.4, inclusive. This is a really high gamma value indicating that our experiment is highly insensitive and won't be easily affected by random hidden bias.
+
+#### STEP 14
+
+Summarize the three treatment effects you found (including the prima facie treatment effect) here. Be sure to compare them to the true effect you found in Step 2. 
+
+- prima facie treatment effect = 3.104006 (Determined in STEP 4 by calculating the difference between the means of the observed outcome in the treated group and the means of the observed outcome in the control group)
+- TE after Propensity Matching = 1.17967(Determined in STEP 7 by using propensity matching such that all covariates are matched based on their likelihood of being either in the treated group or not)
+- TE after Genetic Matching = 1.085716 (Determined in STEP 12 by using genetic matching such that weighing is part of the matching process and the optimal weighting is determined before the covariates are matched )
+- Actual Treatment Effect = 0.85  (Determined in STEP 2 as being the coefficient associated with the treatment variable)
+
+#### STEP 15
+
+Explain which matching method creates better balance across your two covariates. Explain why that might be the case and how you could possibly improve your analysis. 
+
+- We can observe from the above results that genetic matching (TE = 0.9384072) provides the closest value to the True treatment effect (TE = 0.85). This is because genetic matching takes into account the weighting of the variables before it proceeds into matching.To improve out analysis we could optimize our genetic matching algorithm such that it has longer wait generation and population size which will take longer to run but also give us a much optimal and balanced covariate to determine closer to actual treatment effect.
+
+# End of Assignment
+
+## Final Steps
+
+Before finalizing your project you'll want to be sure there are **comments in your code chunks** and **text outside of your code chunks** to explain what you're doing in each code chunk. These explanations are incredibly helpful for someone who doesn't code or someone unfamiliar to your project.
+
+You have two options for submission:
+
+1. You can complete this .rmd file, knit it to pdf and submit the resulting .pdf file on Forum.
+2. You can complete the Google Doc version of this assignment, include your code, graphs, results, and your explanations wherever necessary and download the Google Doc as a pdf file and submit the pdf file on Forum. If you choose this method, you need to make sure you will provide a link to an .R script file where your code can be found (you can host your code on Github or Google Drive). Note that links to Google Docs are not accepted as your final submission.
+
+
+### Knitting your R Markdown Document
+
+Last but not least, you'll want to **Knit your .Rmd document into a pdf document**. If you get an error, take a look at what the error says and edit your .Rmd document. Then, try to Knit again! Troubleshooting these error messages will teach you a lot about coding in R. If you get any error that doesn't make sense to you, post it on Piazza.
+
+
+Good Luck! The Teaching Team
